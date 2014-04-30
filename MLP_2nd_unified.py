@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import datetime
+import argparse
 
 import numpy
 import pylab
@@ -111,7 +112,7 @@ class HiddenLayer(object):
             W = theano.shared(value=W_values, name='W', borrow=True)
 
         if b is None:
-            b_values = numpy.zeros((n_out,), dtype=theano.config.floatX) # + 0.1 # for ReLU
+            b_values = numpy.zeros((n_out,), dtype=theano.config.floatX) + 0.01 # for ReLU
             b = theano.shared(value=b_values, name='b', borrow=True)
 
         self.W = W
@@ -120,7 +121,7 @@ class HiddenLayer(object):
         lin_output = T.dot(layerInput, self.W) + self.b
         self.output = (lin_output if activation is None
                        else activation(lin_output))
-        # self.output = lin_output * (lin_output > 0) #T.max([0,lin_output]) # ReLU
+        #self.output = lin_output * (lin_output > 0) #T.maximum([0,lin_output]) # ReLU
                        
         # parameters of the model
         self.params = [self.W, self.b]
@@ -258,22 +259,23 @@ class MLP(object):
     def loadParams(self, dataPath, MLPtype):
         """ Load the W1, b1, W2 and b2 parameters of the trained network
         input
-            datapath: string (path to the folder with data)
-            MLPtype: string (WNN or NSNN)
+            datapath: string (path to the data)
         """
         
         filename = 'ARCH2_'+ MLPtype +'_params.pkl' # ARCH2_WNN_params.pkl"
         f = file(dataPath+filename, 'rb')
-
-#        # Check if the parameters are of the expected size
-#        loadedParams = cPickle.load(f)
-#        if loadedParams.shape == self.params.shape:
-#            self.params = loadedParams
-#        else:
-#            raise TypeError('Imported parameters are not of the expected shape',
-#                            ('loadedParams', loadedParams.type, 'self.params', self.params.type))
-            
         self.params = cPickle.load(f)
+        
+        # Hand loading...
+        self.hiddenLayer1NSNN.W.set_value(self.params[0].get_value(), borrow=True)
+        self.hiddenLayer2NSNN.W.set_value(self.params[1].get_value(), borrow=True)
+        self.outputLayerNSNN.W.set_value(self.params[2].get_value(), borrow=True)
+        
+        self.hiddenLayerWNN.W.set_value(self.params[3].get_value(), borrow=True)
+        self.hiddenLayerWNN.b.set_value(self.params[4].get_value(), borrow=True)     
+        self.outputLayerWNN.W.set_value(self.params[5].get_value(), borrow=True)
+        self.outputLayerWNN.b.set_value(self.params[6].get_value(), borrow=True)   
+        
         f.close()
         #self.showWeights()
         
@@ -281,16 +283,26 @@ class MLP(object):
         """This function should give a sense of the current weights of the MLP, either by printing or plotting"""
         print 'W1_NSNN: ' + str(self.params[0].get_value().shape)
         print self.params[0].get_value()
+        print self.hiddenLayer1NSNN.W.get_value()
         print 'W2_NSNN: ' + str(self.params[1].get_value().shape)
         print self.params[1].get_value()
-        print 'W1_WNN: ' + str(self.params[2].get_value().shape)
+        print self.hiddenLayer2NSNN.W.get_value()
+        print 'W3_NSNN: ' + str(self.params[2].get_value().shape)
         print self.params[2].get_value()
-        print 'b1_WNN: ' + str(self.params[3].get_value().shape)
+        print self.outputLayerNSNN.W.get_value()
+        
+        print 'W1_WNN: ' + str(self.params[3].get_value().shape)
         print self.params[3].get_value()
-        print 'W2_WNN: ' + str(self.params[4].get_value().shape)
+        print self.hiddenLayerWNN.W.get_value()
+        print 'b1_WNN: ' + str(self.params[4].get_value().shape)
         print self.params[4].get_value()
-        print 'b2_WNN: ' + str(self.params[5].get_value().shape)
+        print self.hiddenLayerWNN.b.get_value()
+        print 'W2_WNN: ' + str(self.params[5].get_value().shape)
         print self.params[5].get_value()
+        print self.outputLayerWNN.W.get_value()
+        print 'b2_WNN: ' + str(self.params[6].get_value().shape)
+        print self.params[6].get_value()
+        print self.outputLayerWNN.b.get_value()
         
         #pylab.figure()
         #pylab.imshow(self.params[0].get_value())
@@ -427,12 +439,12 @@ def test_mlp(learning_rate=[0.15,0.15], L1_reg=[0.0,0.0], L2_reg=[0.000001,0.000
                 y_NSNN: valid_set_y_NSNN[index * batch_size:(index + 1) * batch_size],
                 x_WNN: valid_set_x_WNN[index * batch_size:(index + 1) * batch_size]})
 
-    # compiling a Theano function that reconstructs a sentence
-    yrec_model_NN = theano.function(inputs=[index],
-            outputs=NN.outputLayerNSNN.y_pred,
-            givens={
-                x_NSNN: sentence_x_NSNN[index:index+1],
-                x_WNN: sentence_x_WNN[index:index+1]})
+#    # compiling a Theano function that reconstructs a sentence
+#    yrec_model_NN = theano.function(inputs=[index],
+#            outputs=NN.outputLayerNSNN.y_pred,
+#            givens={
+#                x_NSNN: sentence_x_NSNN[index:index+1],
+#                x_WNN: sentence_x_WNN[index:index+1]})
 
     # compiling a Theano function that generates the next sample
     ygen_model_NN = theano.function(inputs=[index,previous_samples],
@@ -544,8 +556,7 @@ def test_mlp(learning_rate=[0.15,0.15], L1_reg=[0.0,0.0], L2_reg=[0.000001,0.000
         # Training set
         for i in xrange(n_train_batches): # xrange(10000): # 
             train_losses[i] = (560**2)*train_model_NN(i,learning_rate)
-            #NN.showWeights()
-            #raw_input("PRESS ENTER TO CONTINUE.")
+            # NN.showWeights()
             if i%10000 == 0:
                 print('    Training iteration '+str(i)+'/'+str(n_train_batches))
                 if math.isnan(train_losses[i]):
@@ -584,39 +595,46 @@ def test_mlp(learning_rate=[0.15,0.15], L1_reg=[0.0,0.0], L2_reg=[0.000001,0.000
         
             # Save the parameters of the model
             NN.saveParams(savePath, 'NN')
-            log_file.close()
-            log_file = open(savePath+log_name, 'a+')
             
-            # Generate the sentence
-            if epoch%15 == 0:
-                print '\n... ... Generating'
-                for ind,k in enumerate(std_factor):
-                    y_gen = numpy.zeros(n_sentence_samples)
-                    presamples = numpy.zeros(240) #sentence_x_NSNN.get_value()[2500]
-                    for i in xrange(n_sentence_samples): #xrange(1000): #
-                        y_gen[i] = numpy.random.normal(ygen_model_NN(i,presamples.reshape((1, 240))),
-                                                       k*numpy.sqrt(min(train_err)/(560**2)))
-                        presamples = numpy.roll(presamples, -1)
-                        presamples[-1] = y_gen[i]
-                        
-                    output = numpy.int16(y_gen*560)
-                    wv.write(savePath+'Train_generated_data_Epoch'+str(epoch)+'_factor'+str(ind)+'.wav', 16000, output)
+        # Update the text file    
+        log_file.close()
+        log_file = open(savePath+log_name, 'a+')
+            
+	  # Generate the sentence
+        if epoch%15 == 0:
+            print '\n... ... Generating \n'
+            for ind,k in enumerate(std_factor):
+        	    y_gen = numpy.zeros(n_sentence_samples)
+        	    presamples = numpy.zeros(240) #sentence_x_NSNN.get_value()[2500]
+        	    for i in xrange(n_sentence_samples): #xrange(1000): #
+        		y_gen[i] = numpy.random.normal(ygen_model_NN(i,presamples.reshape((1, 240))),
+        		                               k*numpy.sqrt(train_err[best_epoch-1]/(560**2)))
+        		presamples = numpy.roll(presamples, -1)
+        		presamples[-1] = y_gen[i]
+        		
+        	    output = numpy.int16(y_gen*560)
+        	    wv.write(savePath+'Train_generated_data_Epoch'+str(epoch)+'_factor'+str(ind)+'.wav', 16000, output)
+        	    
+        	    if k == 1.0:
+        		pylab.figure()
+        		pylab.plot(y_gen)
+        		pylab.xlabel('Samples')
+        		pylab.ylabel('Amplitude')
+        		pylab.savefig(savePath+'Train_generated_data_Epoch'+str(epoch)+'_factor'+str(ind)+'.png', format='png')
                     
-                    if k == 1.0:
-                        pylab.figure()
-                        pylab.plot(y_gen)
-                        pylab.xlabel('Samples')
-                        pylab.ylabel('Amplitude')
-                        pylab.savefig(savePath+'Train_generated_data_Epoch'+str(epoch)+'_factor'+str(ind)+'.png', format='png')
-            
-#        raw_input("PRESS ENTER TO CONTINUE.")
-            
+        #        raw_input("PRESS ENTER TO CONTINUE.")
+                    
         # Check if the training has improved the validation error; if not, decrease the learning rate
-        if epoch > 20:
+        if epoch > 12:
             if numpy.mean(valid_err[-3:]) > numpy.mean(valid_err[-6:-3]):
-                learning_rate *= 0.5
+                learning_rate *= 0.7
                 print('NEW LEARNING RATE: '+str(learning_rate))
-                log_file.write('\n NEW LEARNING RATE: '+str(learning_rate)+'\n')
+                log_file.write('\nNEW LEARNING RATE: '+str(learning_rate)+'\n')
+            if learning_rate < 1e-6: # Stop training when the learning rate is too small
+                done_looping = True
+                print('Learning rate too small. Training terminated.')
+                log_file.write('Learning rate too small. Training terminated.\n')
+                break
 
     # Load the best model
     try:
@@ -644,42 +662,33 @@ def test_mlp(learning_rate=[0.15,0.15], L1_reg=[0.0,0.0], L2_reg=[0.000001,0.000
         pylab.legend(['train', 'valid'])
         pylab.savefig(savePath+'error.png', format='png')          
     
-        # Reconstruct the sentence
-        print '... ... reconstructing'
-        for i in xrange(n_sentence_samples): #xrange(1000): #
-            if i%10000 == 0:
-                print('    Reconstruction iteration '+str(i)+'/'+str(n_sentence_samples))                     
-            y_pred[i] = yrec_model_NN(i)
-        
-        # Save in wav format and save a figure
-        reconstructed_output = numpy.int16(y_pred*560)
-        wv.write(savePath+'predicted_data.wav', 16000, reconstructed_output)
-        
-        original_output = numpy.int16(sentence_y_NSNN.get_value()*560)
-        wv.write(savePath+'original_data.wav', 16000, original_output)
-        
-        pylab.figure()
-        pylab.subplot(2, 1, 1)
-        pylab.plot(reconstructed_output)
-        pylab.xlabel('Samples')
-        pylab.ylabel('Amplitude')
-        pylab.title('Reconstructed sentence')
-        
-        pylab.subplot(2, 1, 2)
-        pylab.plot(original_output)
-        pylab.xlabel('Samples')
-        pylab.ylabel('Amplitude')
-        pylab.title('Original sentence')
-        
-    #    pylab.subplot(3, 1, 3)
-    #    pylab.plot(reconstructed_output-original_output)
-    #    pylab.xlabel('Samples')
-    #    pylab.ylabel('Amplitude')
-    #    pylab.title('Difference')
-        
-        pylab.savefig(savePath+'reconstructed_data.png', format='png')
-        log_file.write('\n')
-        log_file.write('Reconstruction saved in '+savePath+'predicted_data.png\n')
+#        # Reconstruct the sentence
+#        print '... ... reconstructing'
+#        for i in xrange(n_sentence_samples): #xrange(1000): #
+#            if i%10000 == 0:
+#                print('    Reconstruction iteration '+str(i)+'/'+str(n_sentence_samples))                     
+#            y_pred[i] = yrec_model_NN(i)
+#        
+#        # Save in wav format and save a figure
+#        reconstructed_output = numpy.int16(y_pred*560)
+#        wv.write(savePath+'predicted_data.wav', 16000, reconstructed_output)
+#        
+#        pylab.figure()
+#        pylab.subplot(2, 1, 1)
+#        pylab.plot(reconstructed_output)
+#        pylab.xlabel('Samples')
+#        pylab.ylabel('Amplitude')
+#        pylab.title('Reconstructed sentence')
+#        
+#        pylab.subplot(2, 1, 2)
+#        pylab.plot(original_output)
+#        pylab.xlabel('Samples')
+#        pylab.ylabel('Amplitude')
+#        pylab.title('Original sentence')
+#        
+#        pylab.savefig(savePath+'reconstructed_data.png', format='png')
+#        log_file.write('\n')
+#        log_file.write('Reconstruction saved in '+savePath+'predicted_data.png\n')
     
         # Generate the sentence
         print '\n... ... Generating'
@@ -688,9 +697,12 @@ def test_mlp(learning_rate=[0.15,0.15], L1_reg=[0.0,0.0], L2_reg=[0.000001,0.000
             presamples = numpy.zeros(240) #sentence_x_NSNN.get_value()[2500]
             for i in xrange(n_sentence_samples): #xrange(1000): #
                 y_gen[i] = numpy.random.normal(ygen_model_NN(i,presamples.reshape((1, 240))),
-                                               k*numpy.sqrt(min(train_err)/(560**2)))
+                                               k*numpy.sqrt(train_err[best_epoch-1]/(560**2)))
                 presamples = numpy.roll(presamples, -1)
                 presamples[-1] = y_gen[i]
+                
+            original_output = numpy.int16(sentence_y_NSNN.get_value()*560)
+            wv.write(savePath+'original_data.wav', 16000, original_output)
                 
             output = numpy.int16(y_gen*560)
             wv.write(savePath+'Best_generated_data_'+str(ind)+'.wav', 16000, output)
@@ -700,7 +712,22 @@ def test_mlp(learning_rate=[0.15,0.15], L1_reg=[0.0,0.0], L2_reg=[0.000001,0.000
             pylab.xlabel('Samples')
             pylab.ylabel('Amplitude')
             pylab.savefig(savePath+'generated_data_'+str(ind)+'.png', format='png')
-            log_file.write('Generation saved in '+savePath+'generated_data'+str(ind)+'.png \n')
+            
+            pylab.figure()
+            pylab.subplot(2, 1, 1)
+            pylab.plot(original_output)
+            pylab.xlabel('Samples')
+            pylab.ylabel('Amplitude')
+            pylab.title('Original sentence')
+        
+            pylab.subplot(2, 1, 2)
+            pylab.plot(y_gen*560)
+            pylab.xlabel('Samples')
+            pylab.ylabel('Amplitude')
+            pylab.title('Generated sentence - Factor of '+str(k))
+            
+            pylab.savefig(savePath+'generated_data_'+str(ind)+'.png', format='png')
+            log_file.write('Generation saved in '+savePath+'generated_data'+str(ind)+'.png \n')            
         
     except:
         print('No parameters were saved.')
@@ -721,17 +748,51 @@ if __name__ == '__main__':
     #theano.config.compute_test_value = 'warn'
     #theano.config.mode= 'DebugMode'
     
-    path = '/home/hubert/Documents/IFT6266/TIMIT/TRAIN/DR1/FCJF0/Extracted_Features/'
-    fileNameData = 'win240_ARCH2_FCJF0.npz'
+    # DEFAULT PARAMETERS
+    path = '/home/hubert/Documents/IFT6266/TIMIT/Extracted_Features/' 
+    #'/home/hubert/Documents/IFT6266/TIMIT/TRAIN/DR1/FCJF0/Extracted_Features/' 
+    fileNameData = 'win240_ARCH2_FCJF0_FVFB0.npz' #_FVFB0
     
     # Folder to save the results of the training
     savePath = '/home/hubert/Dropbox/SpeechSynthesis_Project/Results/'
     
     n_hidden_NSNN =[200,150] # for hid_NSNN in n_hidden_NSNN:
     n_hidden_WNN = [250]
-    learning_rates = [0.001,0.0003]
+    learning_rates = [0.001] # 0.005 was very good!
     L2_reg = [0.0]
+    batch_size = 1
+    n_epochs = 500
     
+    # Parser for command line calls
+    parser = argparse.ArgumentParser(description='Second NN architecture - Unified')
+    parser.add_argument('--eta', type=float, help='Learning rate', action='store')
+    parser.add_argument('--L2reg', type=float, help='L2 weight decay', action='store')
+    parser.add_argument('--batch_size', type=int, help='Minibatch size', action='store')
+    parser.add_argument('--n_epochs', type=int, help='Number of epochs', action='store')
+    parser.add_argument('--n_hidden1', type=int, help='Number of hidden units (layer 1) for NSNN', action='store')
+    parser.add_argument('--n_hidden2', type=int, help='Number of hidden units (layer 2) for NSNN', action='store')
+    parser.add_argument('--path', help='Path to the folder with the data', action='store')
+    parser.add_argument('--savePath', help='Path to the folder where to save the results', action='store')
+    parser.add_argument('--fileNameData', help='Name of the data file', action='store')
+    
+    args = parser.parse_args()
+    if args.eta:
+        learning_rates[0] = args.eta
+    if args.L2reg:
+        L2_reg[0] = args.L2reg
+    if args.batch_size:
+        batch_size = args.batch_size
+    if args.n_epochs:
+        n_epochs = args.n_epochs
+    if args.n_hidden1 and args.n_hidden2:
+        n_hidden_NSNN = [args.n_hidden1, args.n_hidden2]
+    if args.path:
+        path = args.path
+    if args.savePath:
+        savePath = args.savePath
+    if args.fileNameData:
+        fileNameData = args.fileNameData
+
     counter = 1
     for L2 in L2_reg:
         for hid_WNN in n_hidden_WNN:
@@ -744,8 +805,8 @@ if __name__ == '__main__':
 
                 test_mlp(learning_rate=[lamb,lamb], 
                          L2_reg=[L2,L2],
-                         batch_size=1, # SHOULD STAY AT 1 ! 
-                         n_epochs=500, 
+                         batch_size=batch_size, # SHOULD STAY AT 1 ! 
+                         n_epochs=n_epochs, 
                          n_hidden=[hid_WNN,n_hidden_NSNN], 
                          dataPath=path,
                          savePath=savePath,

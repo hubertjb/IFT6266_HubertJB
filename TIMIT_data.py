@@ -3,7 +3,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import glob
-import cPickle
+# import cPickle
+import os
 from scipy.stats import mode
 
 class TIMIT_dataset:
@@ -23,20 +24,30 @@ class TIMIT_dataset:
         
         print('The symbols were retrieved successfully.')
         
-    def setSubjectPath(self, setType='train', dialectNb=1, subjectNb=1):
+    def setSubjectPath(self, setType='train', dialectNb=[1], subjectNb=[1]):
         """ Set the current subjectPath for a specific subject """
         
+        self.nb_subjects = len(dialectNb)
+        if self.nb_subjects != len(subjectNb):
+            raise Exception('The size of dialectNb and subjectNb doesn''t fit.')
+        
+        self.subjectName = range(self.nb_subjects)
+        self.subjectPath = range(self.nb_subjects)
+        self.filePaths = range(self.nb_subjects)
+
         # Get the subject path
         setTypeString = {'train': 'TRAIN/', 'test': 'TEST/'}.get(setType)
-        dialectNbString = 'DR'+str(dialectNb)+'/'
-        type_dialect_path = self.rootPath+setTypeString+dialectNbString
-        subjectList = os.listdir(type_dialect_path)
-        self.subjectName = subjectList[subjectNb]
-        self.subjectPath = type_dialect_path + subjectList[subjectNb] + '/'
-        print(self.subjectPath + ' was identified.')
-        
-        # Get all the numpy array paths for the selected subject
-        self.filePaths = glob.glob(self.subjectPath + '*.npy') 
+        for i in range(self.nb_subjects):
+            dialectNbString = 'DR'+str(dialectNb[i])+'/'
+            type_dialect_path = self.rootPath+setTypeString+dialectNbString
+            subjectList = os.listdir(type_dialect_path)
+            self.subjectName[i] = subjectList[subjectNb[i]]
+            self.subjectPath[i] = type_dialect_path + subjectList[subjectNb[i]] + '/'
+            print(self.subjectPath[i] + ' was identified.')
+            
+            # Get all the numpy array paths for the selected subject
+            self.filePaths[i] = glob.glob(self.subjectPath[i] + '*.npy')
+            # Does this return a list in a list? probably...
 
     def extractWindowsFeat2(self, winLength, targetLength=1):
         """ Extract features for the 2nd suggested architecture
@@ -91,20 +102,24 @@ class TIMIT_dataset:
             
         
         # Extract the samples and the current and next phonemes for each file of the current subject
-        nbFiles = len(self.filePaths)
-        for i,files in enumerate(self.filePaths):
-            data = np.load(files)
-            print(str(i+1)+'/'+str(nbFiles)+': '+files+' loaded...')
-            dataLength = data.shape[0]
-            
-            extrFeat,extrTarget = featExtractSamples(data, winLength, targetLength) # Extract the samples         
-            phonPrevious, phonCurrent, phonNext, currPhonDur = featExtractPhonemes(files[:-4]+'.PHN', winLength, targetLength, dataLength) # Extract the phonemes  
-            self.input_NSNN = np.vstack((self.input_NSNN, extrFeat))
-            self.target_NSNN = np.vstack((self.target_NSNN, extrTarget))
-            self.input_WNN = np.vstack((self.input_WNN, np.hstack((phonPrevious, phonCurrent, phonNext, currPhonDur))))
-            
-            if i == nbFiles-1: # Kepp the last utterance for reconstruction/generation of the utterance
-                self.nb_examples_last_utterance = extrFeat.shape[0]
+        # self.filePaths = self.filePaths[0:1] # Hack to get another sentence as the generation sentence
+        nbFiles = 0
+        for k in range(self.nb_subjects):
+            nbFiles += len(self.filePaths[k])
+        for k in range(self.nb_subjects):
+            for i,files in enumerate(self.filePaths[k]):
+                data = np.load(files)
+                print(str((i+1)*(k+1))+'/'+str(nbFiles)+': '+files+' loaded...')
+                dataLength = data.shape[0]
+                
+                extrFeat,extrTarget = featExtractSamples(data, winLength, targetLength) # Extract the samples         
+                phonPrevious, phonCurrent, phonNext, currPhonDur = featExtractPhonemes(files[:-4]+'.PHN', winLength, targetLength, dataLength) # Extract the phonemes  
+                self.input_NSNN = np.vstack((self.input_NSNN, extrFeat))
+                self.target_NSNN = np.vstack((self.target_NSNN, extrTarget))
+                self.input_WNN = np.vstack((self.input_WNN, np.hstack((phonPrevious, phonCurrent, phonNext, currPhonDur))))
+                
+        # Keep the last utterance of the last subject for reconstruction/generation of the utterance    # if k == self.nb_subjects-1 and i == nbFiles-1: 
+        self.nb_examples_last_utterance = extrFeat.shape[0]
                 
         print('Features and targets were successfully extracted.')
         return self.input_NSNN, self.target_NSNN, self.input_WNN
@@ -114,14 +129,15 @@ class TIMIT_dataset:
         archives the features and the targets arrays in the subject's folder FOR THE SECOND ARCHITECTURE"""
         
         print('Saving into a Numpy array...')
-        savePath = self.subjectPath + '/Extracted_Features/' 
+        savePath = self.rootPath + 'Extracted_Features/'
         if not os.path.exists(savePath):
             os.makedirs(savePath)  
         
         # Divide into training, validation and test sets
-        train_ratio = 0.7
-        valid_ratio = 0.15
-        length_data = self.input_NSNN.shape[0] - self.nb_examples_last_utterance
+        train_ratio = 0.8
+        valid_ratio = 0.1
+        length_data = self.input_NSNN.shape[0] - self.nb_examples_last_utterance # In this case, we won't put the last utterance in the training/valid/test sets
+        # length_data = self.input_NSNN.shape[0] # In this case, we use all data in the training/valid/test sets
         n_train = np.round(train_ratio*length_data)
         n_valid = np.round(valid_ratio*length_data)
         
@@ -130,12 +146,14 @@ class TIMIT_dataset:
         np.random.shuffle(random_list)
         
         # Save the features for WNN in a .npz archive
-        filenameSave = 'win' + str(self.winLength) + '_ARCH2_' + self.subjectName + '.npz'
+        
+        subjectNames = '_'.join(self.subjectName)
+        filenameSave = 'win' + str(self.winLength) + '_ARCH2_' + subjectNames + '.npz'
         np.savez(savePath + filenameSave,
                         train_WNN = self.input_WNN[random_list[:n_train],:],                            # Train
                         valid_WNN = self.input_WNN[random_list[n_train:n_train+n_valid],:],             # Valid
                         test_WNN = self.input_WNN[random_list[n_train+n_valid:],:],                     # Test
-                        sentence_WNN = self.input_WNN[length_data:,:],                      			# Sentence
+                        sentence_WNN = self.input_WNN[length_data:,:],                      		      # Sentence
                         train_in_NSNN = self.input_NSNN[random_list[:n_train],:],                       # Train input
                         train_out_NSNN = self.target_NSNN[random_list[:n_train],:],                     # Train target
                         valid_in_NSNN = self.input_NSNN[random_list[n_train:n_train+n_valid],:],        # Valid input
@@ -146,6 +164,7 @@ class TIMIT_dataset:
                         sentence_out_NSNN = self.target_NSNN[length_data:,:])                           # Sentence target
                      
         print('Extracted features for NSNN and WNN saved in: '+ savePath + filenameSave)
+        # print('File size:'+str(sys.getsizeof(myint)))
         
         
     def plotUtterance(self, utteranceNb=1):
@@ -175,10 +194,11 @@ class TIMIT_dataset:
         return y
 
 a = TIMIT_dataset('/home/hubert/Documents/IFT6266/TIMIT/')
-a.setSubjectPath(setType='train', dialectNb=1, subjectNb=4)
+a.setSubjectPath(setType='train', dialectNb=[1,1], subjectNb=[33,0]) # 33: FCJF0 
+# a.setSubjectPath(setType='train', dialectNb=[1,1], subjectNb=[33,0]) # 33: FCJF0 
 a.extractWindowsFeat2(240)
 a.saveExtractedFeat2()
-a.plotUtterance(9)
+# a.plotUtterance(9)
 
 
 
